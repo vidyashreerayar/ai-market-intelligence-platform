@@ -353,3 +353,15 @@ DELETE FROM news_articles
 WHERE title = 'Test Article';
 
 SELECT COUNT(*) FROM news_articles;
+
+SELECT * FROM news_articles;
+
+SELECT
+'INSERT INTO news_articles (article_id, title, source, published_at, url, description) VALUES (' ||
+article_id || ', ' ||
+quote_literal(title) || ', ' ||
+quote_literal(source) || ', ' ||
+quote_literal(published_at) || ', ' ||
+quote_literal(url) || ', ' ||
+quote_literal(description) || ');'
+FROM news_articles;
