@@ -9,7 +9,7 @@ from database.query import get_potato_prices, get_potato_prices_data
 load_dotenv()
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="qwen/qwen3.8-27b",
     temperature=0,
     api_key=os.getenv("GROQ_API_KEY")
 )

@@ -3,6 +3,7 @@ import plotly.express as px
 import streamlit as st
 
 from agents.supervisor import route_question
+from etl.metrics import get_summary_stats
 
 st.set_page_config(
     page_title="Intersnack Market Intelligence Platform",
@@ -92,20 +93,26 @@ with title_col:
 
 st.divider()
 
-# --------------------- Layout --------------------- #
+# --------------------- Tabs --------------------- #
 
-left, right = st.columns([1,2], gap="large")
+tab1, tab2 = st.tabs(["AI Assistant", "Prove Impact"])
 
-# --------------------- Left --------------------- #
+# ==================== TAB 1: AI Assistant ==================== #
 
-with left:
+with tab1:
 
-    st.markdown(
-    "<div class='section-title'>Example Questions</div>",
-    unsafe_allow_html=True,
-)
+    left, right = st.columns([1,2], gap="large")
 
-st.markdown("""
+    # --------------------- Left --------------------- #
+
+    with left:
+
+        st.markdown(
+        "<div class='section-title'>Example Questions</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("""
 **📰 News**
 - Summarize the latest snack industry news.
 - What are the latest news articles related to the snack industry?
@@ -128,167 +135,219 @@ st.markdown("""
 - How could potato price fluctuations affect Intersnack's manufacturing costs?
 """)
 
-# --------------------- Right --------------------- #
+    # --------------------- Right --------------------- #
 
-with right:
+    with right:
+
+        st.markdown(
+            "<div class='section-title'>Ask the AI Assistant</div>",
+            unsafe_allow_html=True,
+        )
+
+        question = st.text_input(
+        "Question",
+        placeholder="Ask about competitors, market trends, news or potato prices...",
+        label_visibility="collapsed"
+        )
+        ask = st.button("Analyze")
+
+        if ask and question:
+
+            with st.spinner("Analyzing..."):
+                answer = route_question(question)
+
+            st.markdown("---")
+
+            st.subheader("Answer")
+            st.write(answer["text"])
+
+            # ---------------- Sources ---------------- #
+
+            if answer.get("sources"):
+                with st.expander(f"📚 Sources ({len(answer['sources'])})"):
+                    for s in answer["sources"]:
+                        st.markdown(
+                            f"**[{s['label']}]** [{s['title']}]({s['url']})  \n"
+                            f"*{s['source']} · relevance: {s['similarity']:.0%}*"
+                        )
+
+            if answer["chart_data"]:
+
+                st.markdown("---")
+                st.subheader(answer["chart_title"])
+
+                df = pd.DataFrame(answer["chart_data"])
+
+                # ---------------- Line Chart ---------------- #
+
+                if answer["chart_type"] == "line":
+
+                    if {"year", "price_eur_per_100kg"}.issubset(df.columns):
+
+                        df["year"] = pd.to_numeric(df["year"])
+                        df["price_eur_per_100kg"] = pd.to_numeric(df["price_eur_per_100kg"])
+
+                        df = df.sort_values("year")
+
+                        fig = px.line(
+                            df,
+                            x="year",
+                            y="price_eur_per_100kg",
+                            markers=True,
+                            title="Historical Potato Prices (2000–2024)"
+                        )
+
+                        fig.update_traces(
+                            line=dict(
+                                color="#C62828",
+                                width=4
+                            ),
+                            marker=dict(
+                                color="#C62828",
+                                size=9,
+                                line=dict(
+                                    color="white",
+                                    width=2
+                                )
+                            ),
+                            hovertemplate="<b>Year:</b> %{x}<br><b>Price:</b> €%{y:.2f}<extra></extra>"
+                        )
+
+                        fig.update_layout(
+                            template="simple_white",
+                            height=500,
+                            hovermode="x unified",
+                            title=dict(
+                                x=0.5,
+                                font=dict(size=24)
+                            ),
+                            margin=dict(l=20,r=20,t=70,b=20),
+                            xaxis=dict(
+                                title="Year",
+                                tickmode="linear",
+                                dtick=2,
+                                showgrid=True,
+                                gridcolor="#E8E8E8",
+                                zeroline=False
+                            ),
+                            yaxis=dict(
+                                title="Price (€ per 100 kg)",
+                                showgrid=True,
+                                gridcolor="#E8E8E8",
+                                zeroline=False
+                            )
+                        )
+
+                        #st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
+
+                        c1, c2, c3 = st.columns(3)
+
+                        with c1:
+                            st.metric(
+                                "Latest Price",
+                                f"€{df.iloc[-1]['price_eur_per_100kg']:.2f}"
+                            )
+
+                        with c2:
+                            st.metric(
+                                "Highest Price",
+                                f"€{df['price_eur_per_100kg'].max():.2f}"
+                            )
+
+                        with c3:
+                            st.metric(
+                                "Lowest Price",
+                                f"€{df['price_eur_per_100kg'].min():.2f}"
+                            )
+
+                # ---------------- Bar Chart ---------------- #
+
+                elif answer["chart_type"] == "bar":
+
+                    if {"competitor", "mentions"}.issubset(df.columns):
+
+                        df = df.sort_values(
+                            "mentions",
+                            ascending=False
+                        )
+
+                        fig = px.bar(
+                            df,
+                            x="competitor",
+                            y="mentions",
+                            text="mentions",
+                            title="Competitor Mentions in Recent News",
+                            color="mentions",
+                            color_continuous_scale=["#F9D5D3", "#C62828"]
+                        )
+
+                        fig.update_traces(
+                            textposition="outside",
+                            hovertemplate="<b>%{x}</b><br>Mentions: %{y}<extra></extra>"
+                        )
+
+                        fig.update_layout(
+                            template="simple_white",
+                            height=500,
+                            title=dict(
+                                x=0.5,
+                                font=dict(size=24)
+                            ),
+                            margin=dict(l=20,r=20,t=70,b=20),
+                            xaxis_title="Competitor",
+                            yaxis_title="Mentions",
+                            coloraxis_showscale=False,
+                            xaxis=dict(
+                                showgrid=False
+                            ),
+                            yaxis=dict(
+                                gridcolor="#E8E8E8"
+                            )
+                        )
+
+                        st.plotly_chart(fig, width="stretch")
+
+                        #st.plotly_chart(fig, use_container_width=True)
+
+# ==================== TAB 2: Prove Impact ==================== #
+
+with tab2:
 
     st.markdown(
-        "<div class='section-title'>Ask the AI Assistant</div>",
+        "<div class='section-title'>Prove Impact — Before vs After</div>",
         unsafe_allow_html=True,
     )
 
-    question = st.text_input(
-    "Question",
-    placeholder="Ask about competitors, market trends, news or potato prices...",
-    label_visibility="collapsed"
-    )
-    ask = st.button("Analyze")
+    stats = get_summary_stats()
 
-    if ask and question:
+    if not stats:
+        st.info("No queries logged yet — ask a few questions in the AI Assistant tab first.")
+    else:
+        before_after = pd.DataFrame([
+            {"Metric": "Report cycle time", "Before (manual)": "5–10 days", "After (AI)": f"{stats['avg_latency']}s" if stats['avg_latency'] else "Seconds"},
+            {"Metric": "Analyst time on reporting", "Before (manual)": "20–30%", "After (AI)": "Query-driven, on-demand"},
+            {"Metric": "Routing confidence (avg)", "Before (manual)": "N/A", "After (AI)": f"{stats['avg_confidence']:.0%}" if stats['avg_confidence'] else "N/A"},
+            {"Metric": "Retrieval relevance (avg)", "Before (manual)": "N/A", "After (AI)": f"{stats['avg_similarity']:.0%}" if stats['avg_similarity'] else "N/A"},
+            {"Metric": "Citation rate (avg)", "Before (manual)": "N/A", "After (AI)": f"{stats['avg_citation_rate']:.0%}" if stats['avg_citation_rate'] else "N/A"},
+            {"Metric": "Source coverage", "Before (manual)": "N/A", "After (AI)": f"{stats['source_coverage']} publishers"},
+            {"Metric": "Data freshness (avg)", "Before (manual)": "N/A", "After (AI)": f"{stats['avg_freshness_days']} days old" if stats['avg_freshness_days'] else "N/A"},
+        ])
 
-        with st.spinner("Analyzing..."):
-            answer = route_question(question)
+        st.table(before_after)
 
-        st.markdown("---")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Total queries answered", stats["total_queries"])
+        with c2:
+            st.metric("Avg sources per answer", stats["avg_num_sources"])
+        with c3:
+            st.metric("Avg response time", f"{stats['avg_latency']}s" if stats['avg_latency'] else "N/A")
+        with c4:
+            st.metric("Source coverage", f"{stats['source_coverage']} publishers")
 
-        st.subheader("Answer")
-        st.write(answer["text"])
-
-        if answer["chart_data"]:
-
-            st.markdown("---")
-            st.subheader(answer["chart_title"])
-
-            df = pd.DataFrame(answer["chart_data"])
-
-            # ---------------- Line Chart ---------------- #
-
-            if answer["chart_type"] == "line":
-
-                if {"year", "price_eur_per_100kg"}.issubset(df.columns):
-
-                    df["year"] = pd.to_numeric(df["year"])
-                    df["price_eur_per_100kg"] = pd.to_numeric(df["price_eur_per_100kg"])
-
-                    df = df.sort_values("year")
-
-                    fig = px.line(
-                        df,
-                        x="year",
-                        y="price_eur_per_100kg",
-                        markers=True,
-                        title="Historical Potato Prices (2000–2024)"
-                    )
-
-                    fig.update_traces(
-                        line=dict(
-                            color="#C62828",
-                            width=4
-                        ),
-                        marker=dict(
-                            color="#C62828",
-                            size=9,
-                            line=dict(
-                                color="white",
-                                width=2
-                            )
-                        ),
-                        hovertemplate="<b>Year:</b> %{x}<br><b>Price:</b> €%{y:.2f}<extra></extra>"
-                    )
-
-                    fig.update_layout(
-                        template="simple_white",
-                        height=500,
-                        hovermode="x unified",
-                        title=dict(
-                            x=0.5,
-                            font=dict(size=24)
-                        ),
-                        margin=dict(l=20,r=20,t=70,b=20),
-                        xaxis=dict(
-                            title="Year",
-                            tickmode="linear",
-                            dtick=2,
-                            showgrid=True,
-                            gridcolor="#E8E8E8",
-                            zeroline=False
-                        ),
-                        yaxis=dict(
-                            title="Price (€ per 100 kg)",
-                            showgrid=True,
-                            gridcolor="#E8E8E8",
-                            zeroline=False
-                        )
-                    )
-
-                    #st.plotly_chart(fig, use_container_width=True)
-                    st.plotly_chart(fig, width="stretch")
-
-                    c1, c2, c3 = st.columns(3)
-
-                    with c1:
-                        st.metric(
-                            "Latest Price",
-                            f"€{df.iloc[-1]['price_eur_per_100kg']:.2f}"
-                        )
-
-                    with c2:
-                        st.metric(
-                            "Highest Price",
-                            f"€{df['price_eur_per_100kg'].max():.2f}"
-                        )
-
-                    with c3:
-                        st.metric(
-                            "Lowest Price",
-                            f"€{df['price_eur_per_100kg'].min():.2f}"
-                        )
-
-            # ---------------- Bar Chart ---------------- #
-
-            elif answer["chart_type"] == "bar":
-
-                if {"competitor", "mentions"}.issubset(df.columns):
-
-                    df = df.sort_values(
-                        "mentions",
-                        ascending=False
-                    )
-
-                    fig = px.bar(
-                        df,
-                        x="competitor",
-                        y="mentions",
-                        text="mentions",
-                        title="Competitor Mentions in Recent News",
-                        color="mentions",
-                        color_continuous_scale=["#F9D5D3", "#C62828"]
-                    )
-
-                    fig.update_traces(
-                        textposition="outside",
-                        hovertemplate="<b>%{x}</b><br>Mentions: %{y}<extra></extra>"
-                    )
-
-                    fig.update_layout(
-                        template="simple_white",
-                        height=500,
-                        title=dict(
-                            x=0.5,
-                            font=dict(size=24)
-                        ),
-                        margin=dict(l=20,r=20,t=70,b=20),
-                        xaxis_title="Competitor",
-                        yaxis_title="Mentions",
-                        coloraxis_showscale=False,
-                        xaxis=dict(
-                            showgrid=False
-                        ),
-                        yaxis=dict(
-                            gridcolor="#E8E8E8"
-                        )
-                    )
-
-                    st.plotly_chart(fig, width="stretch")
-
-                    #st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Before-state figures are estimates from public benchmarks (see README research insights). "
+            "After-state figures are live, computed from actual system usage. "
+            "System uptime is not tracked in this demo (no production deployment to monitor)."
+        )

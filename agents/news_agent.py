@@ -2,62 +2,67 @@ import os
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
 
-from database.query import get_latest_news
+from etl.indexer import NewsIndexer
 
 load_dotenv()
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="qwen/qwen3.8-27b",
     temperature=0,
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# Bind the tool to the model
-llm_with_tools = llm.bind_tools([get_latest_news])
+_indexer = NewsIndexer()
 
 
-def answer_question(question: str):
+def answer_question(question: str, category: str = None):
 
-    response = llm_with_tools.invoke(
-        [HumanMessage(content=question)]
+    retrieved = _indexer.retrieve(query=question, top_k=5, category=category)
+
+    if not retrieved:
+        return {
+            "text": "I don't have any indexed news relevant to that question yet.",
+            "chart_data": None,
+            "chart_title": None,
+            "chart_type": None,
+            "sources": []
+        }
+
+    context_block = "\n\n".join(
+        f"[Source {i+1}: {r['source']}, published {r['published_at']}]\n"
+        f"{r['title']}\n{r['description'] or ''}"
+        for i, r in enumerate(retrieved)
     )
 
-    if response.tool_calls:
-
-        tool_call = response.tool_calls[0]
-
-        if tool_call["name"] == "get_latest_news":
-            tool_result = get_latest_news.invoke(tool_call["args"])
-
-            final_response = llm.invoke(
-                f"""
+    final_response = llm.invoke(
+        f"""
 You are an AI assistant for Intersnack.
 
-Here is the retrieved news:
+Answer the question using ONLY the numbered sources below.
+Cite the source number for every factual claim, e.g. [Source 1].
+If the sources don't fully answer the question, say so rather than guessing.
 
-{tool_result}
-
-Answer the user's question.
+Sources:
+{context_block}
 
 Question:
 {question}
 """
-            )
+    )
 
-            return {
-                "text": final_response.content,
-                "chart_data": None,
-                "chart_title": None,
-                "chart_type": None
-            }
+    sources = [
+        {"label": f"Source {i+1}", "title": r["title"], "url": r["url"],
+         "source": r["source"], "similarity": round(r["similarity"], 3)}
+        for i, r in enumerate(retrieved)
+    ]
 
     return {
-        "text": response.content,
+        "text": final_response.content,
         "chart_data": None,
         "chart_title": None,
-        "chart_type": None
+        "chart_type": None,
+        "sources": sources
     }
 
 
@@ -72,3 +77,7 @@ if __name__ == "__main__":
 
         print("\nAnswer:")
         print(answer["text"])
+        if answer.get("sources"):
+            print("\nSources:")
+            for s in answer["sources"]:
+                print(f"  [{s['label']}] {s['title']} — {s['url']} (similarity: {s['similarity']})")
