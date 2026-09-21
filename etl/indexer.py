@@ -1,3 +1,6 @@
+#SentenceTransformer is used to convert news text into embeddings, 
+# while SQLAlchemy and the database engine are used for PostgreSQL operations.
+#The local all-MiniLM-L6-v2 model produces 384-dimensional embeddings.
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import text
 from database.connection import engine
@@ -5,17 +8,19 @@ from database.connection import engine
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # 384-dim, local, free
 EMBEDDING_DIM = 384
 
-
 class NewsIndexer:
     """
     Embeds news articles into a pgvector table for RAG retrieval.
     Runs after DatabaseLoader.load_dataframe() so it only embeds newly inserted rows.
     """
-
+    #The class handles converting news articles into embeddings and storing them for semantic retrieval.
+    #The PostgreSQL engine and embedding model are initialized when the indexer is created.
     def __init__(self):
         self.engine = engine
         self.model = SentenceTransformer(EMBEDDING_MODEL)
-
+    
+    #The pgvector extension and news_embeddings table are created if they do not already exist.
+    #A vector index is also created to make similarity-based retrieval more efficient.
     def ensure_schema(self):
         with self.engine.connect() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
@@ -36,7 +41,8 @@ class NewsIndexer:
                     ON news_embeddings USING ivfflat (embedding vector_cosine_ops);
             """))
             conn.commit()
-
+    #Incoming news articles are checked against URLs already present in news_embeddings, so only unindexed articles are processed.
+    #Each new article is converted into an embedding and stored in PostgreSQL together with its metadata and category.
     def index_dataframe(self, df, category: str = "general_news"):
         """Embed and store rows not already indexed (by url)."""
         if df.empty:
@@ -55,7 +61,7 @@ class NewsIndexer:
             for _, row in new_rows.iterrows():
                 content = f"{row['title']}\n\n{row.get('description') or ''}".strip()
                 if len(content) < 20:
-                    continue  # skip near-empty content — basic quality gate
+                    continue  #Skips articles with almost no useful text.
 
                 embedding = self.model.encode(content).tolist()
 
@@ -80,7 +86,8 @@ class NewsIndexer:
 
         print(f"Indexed {len(new_rows)} new articles into news_embeddings.")
         return len(new_rows)
-
+    #The user's query is converted into an embedding using the same model.
+    #PostgreSQL then finds the most semantically similar news articles using vector similarity and returns the top results.
     def retrieve(self, query: str, top_k: int = 5, category: str = None):
         query_embedding = self.model.encode(query).tolist()
 
